@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import subprocess
-import sys
 
 from aimx.native_aim.locator import NativeAimResolution
 
@@ -30,12 +29,6 @@ def run_passthrough(args: list[str], resolution: NativeAimResolution) -> Delegat
 
     result = subprocess.run(
         [resolution.executable_path, *args],
-        capture_output=True,
-        text=True,
         check=False,
     )
-    if result.stdout:
-        sys.stdout.write(result.stdout)
-    if result.stderr:
-        sys.stderr.write(result.stderr)
     return DelegatedExecutionResult(process_started=True, exit_status=result.returncode)
