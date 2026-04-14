@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from aimx import __version__
 from aimx.__main__ import main
 
 
@@ -12,7 +13,7 @@ def test_owned_commands_still_work_when_native_aim_is_missing(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "aimx 0.1.0" in captured.out
+    assert f"aimx {__version__}" in captured.out
 
 
 def test_doctor_reports_missing_native_aim(capsys, monkeypatch) -> None:

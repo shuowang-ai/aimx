@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 import sys
 
+from aimx import __version__
+
 
 def _reload_main_without_python_aim(monkeypatch):
     monkeypatch.setitem(sys.modules, "aim", None)
@@ -24,7 +26,7 @@ def test_owned_commands_still_work_when_python_aim_package_is_missing(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "aimx 0.1.0" in captured.out
+    assert f"aimx {__version__}" in captured.out
 
 
 def test_query_reports_actionable_error_when_python_aim_package_is_missing(

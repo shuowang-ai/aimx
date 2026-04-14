@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from aimx import __version__
 from aimx.commands.help import render_help
 from aimx.commands.version import render_version
 
@@ -17,5 +18,5 @@ def test_render_help_lists_owned_commands_and_passthrough_boundary() -> None:
 def test_render_version_includes_native_version_when_available() -> None:
     version_text = render_version(native_aim_version="3.29.1")
 
-    assert "aimx 0.1.0" in version_text
+    assert f"aimx {__version__}" in version_text
     assert "native aim 3.29.1" in version_text
