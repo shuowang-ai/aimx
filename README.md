@@ -41,6 +41,13 @@ whether native Aim is available for passthrough.
 current directory `.`. When provided, it accepts either the repository root,
 such as `data`, or the metadata directory itself, such as `data/.aim`.
 
+Both `aimx query` and `aimx trace` accept **AimQL** expressions (Aim's native
+Python-like query language) as their filter argument — e.g.
+`"metric.name == 'loss' and run.hparams.learning_rate > 0.001"`. For the full
+syntax, supported properties (`run.*`, `metric.*`, `images.*`), and security
+restrictions, see the upstream docs:
+[Aim — Query language basics](https://aimstack.readthedocs.io/en/latest/using/search.html).
+
 ### `aimx query` — discover and summarise metrics
 
 Queries an Aim repository and shows a grouped table with per-metric statistics
