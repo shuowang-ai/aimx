@@ -1,6 +1,6 @@
 [project]
 name = "aimx"
-version = "0.3.0"
+version = "0.3.1"
 description = "A safe CLI-first companion for native Aim"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=1.24",
     "plotext>=5.3",
     "rich>=13.7",
+    "textual-image>=0.12.0",
 ]
 
 [project.scripts]
