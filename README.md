@@ -48,7 +48,7 @@ syntax, supported properties (`run.*`, `metric.*`, `images.*`), and security
 restrictions, see the upstream docs:
 [Aim — Query language basics](https://aimstack.readthedocs.io/en/latest/using/search.html).
 
-### `aimx query` — discover and summarise metrics
+### `aimx query` — discover and summarise metrics, images, and run params
 
 Queries an Aim repository and shows a grouped table with per-metric statistics
 (step count, last value, min/max with step).
@@ -108,13 +108,34 @@ aimx query images "images" --repo data --max-images 0    # no cap (render all)
 
 # Combine epoch filter + head + TTY cap
 aimx query images "images" --repo data --epochs 10:50 --head 10 --max-images 4
+
+# Run params — compare configuration across matching runs
+aimx query params "run.hash != ''" --repo data
+aimx query params "run.experiment == 'cloud-segmentation'" --repo data --param hparam.lr --param hparam.optimizer
+
+# Params output for scripts
+aimx query params "run.experiment == 'cloud-segmentation'" --repo data --plain
+aimx query params "run.experiment == 'cloud-segmentation'" --repo data --json
+
+# Params can also be filtered with AimQL run fields
+aimx query params "run.hparam.lr == 0.0001" --repo data --param hparam.lr
 ```
 
-Output modes: `--json` (nested runs→metrics), `--oneline` / `--plain` (tab-separated),
-default (rich table with inline image preview).
+Output modes: `--json` (structured result envelope), `--oneline` / `--plain`
+(tab-separated), default (rich table with inline image preview for images).
 Filter/sampling flags (affect all output modes): `--steps start:end | --epochs start:end`
 (mutually exclusive), `--head N`, `--tail N`, `--every K`.
-Additional flags: `--no-color`, `--verbose`, `--max-images N` (images TTY cap only).
+Additional flags: `--no-color`, `--verbose`, `--max-images N` (images TTY cap only),
+`--param KEY` (params only, repeatable selected parameter).
+
+#### Run params comparison
+
+`aimx query params` reads run-level Aim metadata without modifying the repository.
+By default it shows a readable set of discovered parameter columns. Add
+`--param KEY` one or more times to align specific flattened params such as
+`hparam.lr`, `hparam.optimizer`, and `model` across matching runs. Missing
+selected params are displayed as `-` in terminal/plain output and listed under
+`missing_params` in JSON.
 
 #### Inline image preview
 
