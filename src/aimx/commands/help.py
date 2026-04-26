@@ -26,6 +26,7 @@ def render_help() -> str:
             "             Example: aimx query params \"run.experiment=='cloud-segmentation'\" --repo data --param hparam.lr",
             "  trace      Plot a metric's time-series from a local Aim repository",
             "             Usage: aimx trace <expression> [--repo <path>]",
+            "             Usage: aimx trace distribution <expression> [--repo <path>]",
             "             Options: --table  --csv  --json",
             "                      --steps start:end  (e.g. --steps 100:500, :50, 100:)",
             "                      --head N  --tail N  --every K",
@@ -33,6 +34,7 @@ def render_help() -> str:
             "             Repo defaults to the current directory.",
             "             Short run hashes in the expression are transparently expanded.",
             "             Example: aimx trace \"metric.name=='loss'\" --repo data --steps 100:500",
+            "             Example: aimx trace distribution \"distribution.name=='weights'\" --repo data --json",
             "",
             "All other commands are delegated to native `aim`.",
         ]

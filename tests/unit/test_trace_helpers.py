@@ -9,6 +9,7 @@ from aimx.commands.trace import TraceInvocation, parse_trace_invocation
 
 def test_parse_trace_defaults() -> None:
     inv = parse_trace_invocation(["metric.name=='loss'"])
+    assert inv.target == "metrics"
     assert inv.expression == "metric.name=='loss'"
     assert inv.repo_path == Path(".")
     assert inv.mode == "plot"
@@ -64,6 +65,18 @@ def test_parse_trace_no_color_flag() -> None:
 def test_parse_trace_explicit_repo_overrides_default() -> None:
     inv = parse_trace_invocation(["metric.name=='loss'", "--repo", "data"])
     assert inv.repo_path == Path("data")
+
+
+def test_parse_trace_distribution_target() -> None:
+    inv = parse_trace_invocation(["distribution", "distribution.name=='weights'", "--repo", "data"])
+    assert inv.target == "distribution"
+    assert inv.expression == "distribution.name=='weights'"
+    assert inv.repo_path == Path("data")
+
+
+def test_parse_trace_distribution_requires_expression() -> None:
+    with pytest.raises(ValueError, match="trace distribution"):
+        parse_trace_invocation(["distribution"])
 
 
 def test_parse_trace_rejects_unknown_flag() -> None:

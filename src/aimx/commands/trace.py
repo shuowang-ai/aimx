@@ -12,6 +12,7 @@ _MODES = {"plot", "table", "csv", "json"}
 
 @dataclass(frozen=True)
 class TraceInvocation:
+    target: Literal["metrics", "distribution"]
     expression: str
     repo_path: Path
     mode: Literal["plot", "table", "csv", "json"] = "plot"
@@ -27,13 +28,26 @@ class TraceInvocation:
 def parse_trace_invocation(args: list[str]) -> TraceInvocation:
     if len(args) < 1:
         raise ValueError(
-            "Usage: aimx trace <expression> [--repo <path>] [--table|--csv|--json]"
+            "Usage: aimx trace [distribution] <expression> [--repo <path>] [--table|--csv|--json]"
             " [--steps start:end] [--head N] [--tail N] [--every K]"
             " [--width W] [--height H] [--no-color]"
         )
 
-    expression = args[0]
-    rest = args[1:]
+    target: Literal["metrics", "distribution"] = "metrics"
+    expression: str | None = None
+    rest = args
+    if args[0] == "distribution":
+        target = "distribution"
+        if len(args) < 2:
+            raise ValueError(
+                "Usage: aimx trace distribution <expression> [--repo <path>] [--table|--csv|--json]"
+                " [--steps start:end] [--head N] [--tail N] [--every K] [--no-color]"
+            )
+        expression = args[1]
+        rest = args[2:]
+    else:
+        expression = args[0]
+        rest = args[1:]
 
     mode: Literal["plot", "table", "csv", "json"] = "plot"
     repo_value = "."
@@ -118,6 +132,7 @@ def parse_trace_invocation(args: list[str]) -> TraceInvocation:
             raise ValueError(f"Unsupported trace option: {token}")
 
     return TraceInvocation(
+        target=target,
         expression=expression,
         repo_path=Path(repo_value),
         mode=mode,
@@ -142,56 +157,99 @@ def run_trace_command(args: list[str]) -> QueryCommandResult:
     effective_no_color = invocation.no_color or not is_tty
 
     try:
-        from aimx.aim_bridge.metric_stats import (
-            collect_metric_series,
-            filter_by_step_range,
-            parse_step_slice,
-            subsample,
-        )
+        from aimx.aim_bridge.metric_stats import parse_step_slice
         from aimx.rendering.trace_views import (
+            render_distribution_csv,
+            render_distribution_json,
+            render_distribution_table,
             render_csv,
+            render_trace_table,
             render_plot,
             render_trace_json,
-            render_trace_table,
         )
 
-        series_list = collect_metric_series(invocation.expression, normalized_repo_path)
-
-        if not series_list:
-            return QueryCommandResult(exit_status=0, output="No matching metrics found.")
-
-        # Step range filter is a hard constraint applied before density subsampling
-        if invocation.step_slice is not None:
-            step_start, step_end = parse_step_slice(invocation.step_slice)
-            series_list = [filter_by_step_range(s, step_start, step_end) for s in series_list]
-            # Drop empty series so they don't clutter plots
-            series_list = [s for s in series_list if s.count > 0]
-
-        if not series_list:
-            return QueryCommandResult(exit_status=0, output="No data in the requested step range.")
-
-        # Density subsampling for visualisation
-        needs_sample = any(
-            x is not None for x in (invocation.head, invocation.tail, invocation.every)
-        )
-        if needs_sample:
-            series_list = [
-                subsample(s, head=invocation.head, tail=invocation.tail, every=invocation.every)
-                for s in series_list
-            ]
-
-        if invocation.mode == "json":
-            output = render_trace_json(series_list)
-        elif invocation.mode == "csv":
-            output = render_csv(series_list)
-        elif invocation.mode == "table":
-            output = render_trace_table(series_list, no_color=effective_no_color)
-        else:
-            output = render_plot(
-                series_list,
-                width=invocation.width,
-                height=invocation.height,
+        if invocation.target == "distribution":
+            from aimx.aim_bridge.metric_stats import (
+                collect_distribution_series,
+                filter_distribution_by_step_range,
+                subsample_distribution,
             )
+
+            series_list = collect_distribution_series(invocation.expression, normalized_repo_path)
+            if not series_list:
+                return QueryCommandResult(exit_status=0, output="No matching distributions found.")
+
+            if invocation.step_slice is not None:
+                step_start, step_end = parse_step_slice(invocation.step_slice)
+                series_list = [
+                    filter_distribution_by_step_range(s, step_start, step_end) for s in series_list
+                ]
+                series_list = [s for s in series_list if s.count > 0]
+
+            if not series_list:
+                return QueryCommandResult(exit_status=0, output="No data in the requested step range.")
+
+            needs_sample = any(
+                x is not None for x in (invocation.head, invocation.tail, invocation.every)
+            )
+            if needs_sample:
+                series_list = [
+                    subsample_distribution(
+                        s, head=invocation.head, tail=invocation.tail, every=invocation.every
+                    )
+                    for s in series_list
+                ]
+
+            if invocation.mode == "json":
+                output = render_distribution_json(series_list)
+            elif invocation.mode == "csv":
+                output = render_distribution_csv(series_list)
+            else:
+                output = render_distribution_table(series_list, no_color=effective_no_color)
+        else:
+            from aimx.aim_bridge.metric_stats import (
+                collect_metric_series,
+                filter_by_step_range,
+                subsample,
+            )
+
+            series_list = collect_metric_series(invocation.expression, normalized_repo_path)
+
+            if not series_list:
+                return QueryCommandResult(exit_status=0, output="No matching metrics found.")
+
+            # Step range filter is a hard constraint applied before density subsampling
+            if invocation.step_slice is not None:
+                step_start, step_end = parse_step_slice(invocation.step_slice)
+                series_list = [filter_by_step_range(s, step_start, step_end) for s in series_list]
+                # Drop empty series so they don't clutter plots
+                series_list = [s for s in series_list if s.count > 0]
+
+            if not series_list:
+                return QueryCommandResult(exit_status=0, output="No data in the requested step range.")
+
+            # Density subsampling for visualisation
+            needs_sample = any(
+                x is not None for x in (invocation.head, invocation.tail, invocation.every)
+            )
+            if needs_sample:
+                series_list = [
+                    subsample(s, head=invocation.head, tail=invocation.tail, every=invocation.every)
+                    for s in series_list
+                ]
+
+            if invocation.mode == "json":
+                output = render_trace_json(series_list)
+            elif invocation.mode == "csv":
+                output = render_csv(series_list)
+            elif invocation.mode == "table":
+                output = render_trace_table(series_list, no_color=effective_no_color)
+            else:
+                output = render_plot(
+                    series_list,
+                    width=invocation.width,
+                    height=invocation.height,
+                )
 
         return QueryCommandResult(exit_status=0, output=output)
 

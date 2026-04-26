@@ -11,7 +11,7 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from aimx.aim_bridge.metric_stats import MetricSeries, RunMeta
+from aimx.aim_bridge.metric_stats import DistributionSeries, MetricSeries, RunMeta
 from aimx.rendering import colors
 
 
@@ -26,6 +26,19 @@ def _fmt_context(ctx: dict[str, Any]) -> str:
 
 
 def _series_label(series: MetricSeries) -> str:
+    parts = [_short_hash(series.run.hash)]
+    if series.run.experiment:
+        parts.append(series.run.experiment)
+    elif series.run.name:
+        parts.append(series.run.name)
+    parts.append(series.name)
+    ctx = _fmt_context(series.context)
+    if ctx:
+        parts.append(f"[{ctx}]")
+    return " · ".join(parts)
+
+
+def _distribution_series_label(series: DistributionSeries) -> str:
     parts = [_short_hash(series.run.hash)]
     if series.run.experiment:
         parts.append(series.run.experiment)
@@ -163,6 +176,108 @@ def render_trace_json(series_list: list[MetricSeries]) -> str:
                 "steps": series.steps.tolist(),
                 "epochs": series.epochs.tolist() if series.epochs is not None else None,
                 "values": series.values.tolist(),
+            }
+        )
+    return json.dumps(result)
+
+
+def _format_tensor(values: list[float], *, limit: int = 12) -> str:
+    if len(values) <= limit:
+        return "[" + ", ".join(f"{v:.6g}" for v in values) + "]"
+    head = ", ".join(f"{v:.6g}" for v in values[:limit])
+    return f"[{head}, …] ({len(values)} bins)"
+
+
+def render_distribution_table(
+    series_list: list[DistributionSeries],
+    *,
+    no_color: bool = False,
+) -> str:
+    """Render distribution series as a step-indexed tensor table."""
+    width = 120 if no_color else shutil.get_terminal_size(fallback=(120, 24)).columns
+    buf = io.StringIO()
+    console = Console(
+        file=buf,
+        no_color=no_color,
+        force_terminal=not no_color,
+        width=width,
+        highlight=False,
+    )
+
+    for series in series_list:
+        label = _distribution_series_label(series)
+        console.print(f"\n[{colors.HEADER}]{label}[/]  [{colors.HEADER}]{series.count} points[/]")
+
+        table = Table(
+            show_header=True,
+            header_style=colors.HEADER,
+            box=None,
+            pad_edge=True,
+            show_edge=False,
+            padding=(0, 1),
+        )
+        table.add_column("STEP", justify="right")
+        table.add_column("EPOCH", justify="right")
+        table.add_column("TENSOR", justify="left", style=colors.NUMBER_EMPH)
+
+        for point in series.points:
+            epoch = f"{point.epoch:.6g}" if point.epoch is not None else "—"
+            weights = point.weights.tolist()
+            table.add_row(str(point.step), epoch, _format_tensor(weights))
+
+        console.print(table)
+
+    return buf.getvalue()
+
+
+def render_distribution_csv(series_list: list[DistributionSeries]) -> str:
+    """Render distribution rows as CSV."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        ["run_hash", "experiment", "distribution", "context", "step", "epoch", "bin_edges", "weights"]
+    )
+    for series in series_list:
+        ctx_str = json.dumps(series.context, sort_keys=True)
+        for point in series.points:
+            writer.writerow(
+                [
+                    series.run.hash,
+                    series.run.experiment or series.run.name or "",
+                    series.name,
+                    ctx_str,
+                    point.step,
+                    point.epoch if point.epoch is not None else "",
+                    json.dumps(point.bin_edges.tolist()),
+                    json.dumps(point.weights.tolist()),
+                ]
+            )
+    return buf.getvalue()
+
+
+def render_distribution_json(series_list: list[DistributionSeries]) -> str:
+    """Render distribution rows as JSON."""
+    result: list[dict[str, Any]] = []
+    for series in series_list:
+        result.append(
+            {
+                "run": {
+                    "hash": series.run.hash,
+                    "experiment": series.run.experiment,
+                    "name": series.run.name,
+                },
+                "distribution": series.name,
+                "context": series.context,
+                "count": series.count,
+                "points": [
+                    {
+                        "step": point.step,
+                        "epoch": point.epoch,
+                        "bin_edges": point.bin_edges.tolist(),
+                        "weights": point.weights.tolist(),
+                    }
+                    for point in series.points
+                ],
             }
         )
     return json.dumps(result)
