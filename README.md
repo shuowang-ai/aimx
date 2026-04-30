@@ -232,6 +232,31 @@ aimx trace "metric.name == 'loss'" --repo data --every 10
 Output modes: default plot, `--table`, `--csv`, `--json`.
 Display controls: `--width W`, `--height H`, `--no-color`.
 
+### Trace distributions
+
+`aimx trace distribution` fetches tracked Aim distribution sequences. By
+default it prints the matched distribution names, selects the first match, and
+renders a non-interactive Rich terminal visual with a web-style blue-gradient
+current-step histogram and step-by-bin heatmap. Use `--table`, `--csv`, or
+`--json` for tensor inspection and scripting.
+
+![aimx trace distribution output preview](static/distributions.png)
+
+```bash
+# Show a web-like terminal visual for the first matched distribution
+aimx trace distribution "distribution.name != ''" --repo data
+
+# Inspect a specific training step; nearest tracked step is used if needed
+aimx trace distribution "distribution.name != ''" --repo data --step 12300
+
+# Show distribution tensors in a readable table
+aimx trace distribution "distribution.name == 'weights'" --repo data --table
+
+# Export distribution histograms for scripting
+aimx trace distribution "distribution.name == 'weights'" --repo data --csv
+aimx trace distribution "distribution.name == 'weights'" --repo data --json
+```
+
 ### Common query options
 
 - Output: `--json`, `--oneline` / `--plain`, or the default rich terminal view.

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import sys
+import types
 
 import numpy as np
 import pytest
@@ -218,3 +220,53 @@ class TestSubsample:
         s = _make_series(values=[10.0, 20.0, 30.0, 40.0], steps=[100, 200, 300, 400])
         result = subsample(s, head=2, tail=None, every=None)
         assert result.steps.tolist() == [100, 200]
+
+
+class TestCollectDistributionSeries:
+    def test_rewrites_singular_distribution_variable_before_query(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        from aimx.aim_bridge.metric_stats import collect_distribution_series
+
+        captured: dict[str, object] = {}
+
+        class _FakeQueryReportMode:
+            DISABLED = object()
+
+        class _FakeDistributionQueryResult:
+            def iter_runs(self):
+                return []
+
+        class _FakeRepo:
+            def __init__(self, repo_path: str) -> None:
+                captured["repo_path"] = repo_path
+
+            def query_distributions(self, expression: str, *, report_mode: object):
+                captured["expression"] = expression
+                captured["report_mode"] = report_mode
+                return _FakeDistributionQueryResult()
+
+        aim_module = types.ModuleType("aim")
+        aim_module.Repo = _FakeRepo
+        sdk_module = types.ModuleType("aim.sdk")
+        types_module = types.ModuleType("aim.sdk.types")
+        types_module.QueryReportMode = _FakeQueryReportMode
+
+        monkeypatch.setitem(sys.modules, "aim", aim_module)
+        monkeypatch.setitem(sys.modules, "aim.sdk", sdk_module)
+        monkeypatch.setitem(sys.modules, "aim.sdk.types", types_module)
+
+        result = collect_distribution_series(
+            "run.hparams.distribution == 'enabled' and distribution.name == 'weights'",
+            tmp_path,
+        )
+
+        assert result == []
+        assert captured["repo_path"] == str(tmp_path)
+        assert (
+            captured["expression"]
+            == "run.hparams.distribution == 'enabled' and distributions.name == 'weights'"
+        )
+        assert captured["report_mode"] is _FakeQueryReportMode.DISABLED

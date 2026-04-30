@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import io
+import tokenize
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,26 @@ class MetricSeries:
             return (float("nan"), -1)
         idx = int(np.argmax(self.values))
         return (float(self.values[idx]), int(self.steps[idx]))
+
+
+@dataclass(frozen=True)
+class DistributionPoint:
+    step: int
+    epoch: float | None
+    weights: np.ndarray
+    bin_edges: np.ndarray
+
+
+@dataclass
+class DistributionSeries:
+    run: RunMeta
+    name: str
+    context: dict[str, Any]
+    points: list[DistributionPoint]
+
+    @property
+    def count(self) -> int:
+        return len(self.points)
 
 
 def _extract_run_meta(run: Any) -> RunMeta:
@@ -233,6 +254,97 @@ def collect_image_series(expression: str, repo_path: Path) -> list[dict[str, Any
     return rows
 
 
+def _normalize_distribution_query_expression(expression: str) -> str:
+    """Alias documented ``distribution`` queries to Aim's ``distributions`` variable."""
+    tokens: list[tokenize.TokenInfo] = []
+    previous_significant_token = ""
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(expression).readline):
+            if (
+                token.type == tokenize.NAME
+                and token.string == "distribution"
+                and previous_significant_token != "."
+            ):
+                token = tokenize.TokenInfo(
+                    token.type,
+                    "distributions",
+                    token.start,
+                    token.end,
+                    token.line,
+                )
+            tokens.append(token)
+            if token.type not in {
+                tokenize.COMMENT,
+                tokenize.DEDENT,
+                tokenize.ENDMARKER,
+                tokenize.INDENT,
+                tokenize.NEWLINE,
+                tokenize.NL,
+            }:
+                previous_significant_token = token.string
+    except tokenize.TokenError:
+        return expression
+
+    return tokenize.untokenize(tokens)
+
+
+def collect_distribution_series(expression: str, repo_path: Path) -> list[DistributionSeries]:
+    """Run an Aim distribution query and return flat ``DistributionSeries`` records."""
+    from aimx.aim_bridge.hash_resolver import resolve_hash_prefixes
+
+    expression = resolve_hash_prefixes(expression, repo_path)
+    expression = _normalize_distribution_query_expression(expression)
+
+    try:
+        from aim import Repo
+        from aim.sdk.types import QueryReportMode
+    except ModuleNotFoundError as error:
+        raise RuntimeError(
+            "`aimx` requires the Python `aim` package in the current environment."
+        ) from error
+
+    repo = Repo(str(repo_path))
+    results: list[DistributionSeries] = []
+
+    stderr_buf = io.StringIO()
+    with contextlib.redirect_stderr(stderr_buf):
+        query_result = repo.query_distributions(
+            expression, report_mode=QueryReportMode.DISABLED
+        )
+        for run_collection in query_result.iter_runs():
+            for distribution in run_collection:
+                run_meta = _extract_run_meta(distribution.run)
+                try:
+                    steps, (values, epochs, _timestamps) = distribution.data.items_list()
+                except ValueError:
+                    steps, values, epochs = [], [], []
+
+                points: list[DistributionPoint] = []
+                for idx, value in enumerate(values):
+                    step_value = int(steps[idx])
+                    epoch_value = float(epochs[idx]) if idx < len(epochs) else None
+                    weights, bin_edges = value.to_np_histogram()
+                    points.append(
+                        DistributionPoint(
+                            step=step_value,
+                            epoch=epoch_value,
+                            weights=np.array(weights, dtype=float),
+                            bin_edges=np.array(bin_edges, dtype=float),
+                        )
+                    )
+
+                results.append(
+                    DistributionSeries(
+                        run=run_meta,
+                        name=distribution.name,
+                        context=distribution.context.to_dict(),
+                        points=points,
+                    )
+                )
+
+    return results
+
+
 def subsample(series: MetricSeries, *, head: int | None, tail: int | None, every: int | None) -> MetricSeries:
     """Return a new MetricSeries with points filtered by head/tail/every."""
     n = len(series.values)
@@ -255,6 +367,48 @@ def subsample(series: MetricSeries, *, head: int | None, tail: int | None, every
         values=series.values[indices],
         steps=series.steps[indices],
         epochs=epochs_slice,
+    )
+
+
+def filter_distribution_by_step_range(
+    series: DistributionSeries,
+    start: int | None,
+    end: int | None,
+) -> DistributionSeries:
+    """Return a new ``DistributionSeries`` filtered by inclusive step bounds."""
+    points = series.points
+    if start is not None:
+        points = [point for point in points if point.step >= start]
+    if end is not None:
+        points = [point for point in points if point.step <= end]
+    return DistributionSeries(
+        run=series.run,
+        name=series.name,
+        context=series.context,
+        points=points,
+    )
+
+
+def subsample_distribution(
+    series: DistributionSeries,
+    *,
+    head: int | None,
+    tail: int | None,
+    every: int | None,
+) -> DistributionSeries:
+    """Return a new ``DistributionSeries`` filtered by head/tail/every."""
+    points = series.points
+    if head is not None:
+        points = points[:head]
+    if tail is not None:
+        points = points[-tail:]
+    if every is not None and every > 1:
+        points = points[::every]
+    return DistributionSeries(
+        run=series.run,
+        name=series.name,
+        context=series.context,
+        points=points,
     )
 
 
