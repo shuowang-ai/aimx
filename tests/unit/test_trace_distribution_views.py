@@ -8,6 +8,8 @@ import numpy as np
 
 from aimx.aim_bridge.metric_stats import DistributionPoint, DistributionSeries, RunMeta
 from aimx.rendering.trace_views import (
+    _compress_values,
+    _intensity_text,
     render_distribution_csv,
     render_distribution_json,
     render_distribution_table,
@@ -183,6 +185,38 @@ def test_render_distribution_visual_labels_nearest_step() -> None:
 
     assert "Step 600" in output
     assert "Requested step 750; showing nearest tracked step 600." in output
+
+
+def test_render_distribution_visual_small_height_does_not_zero_divide_heatmap() -> None:
+    """height 12 or 13 yields max_heatmap_rows == 1; sampling must not divide by zero."""
+    for height in (12, 13):
+        output = render_distribution_visual(
+            _multi_step_distribution_series(),
+            height=height,
+            no_color=True,
+        )
+        assert "Heatmap (steps x bins)" in output
+        assert "900 |" in output
+        assert "Showing 1 of 3 steps" in output
+
+
+def test_compress_values_ignores_non_finite_in_bucket_max() -> None:
+    nan = float("nan")
+    inf = float("inf")
+    # width=2 splits [1, nan, 10, 5] into [1, nan] and [10, 5]
+    assert _compress_values([1.0, nan, 10.0, 5.0], width=2) == [1.0, 10.0]
+    # bucket is only non-finite -> default 0.0
+    assert _compress_values([nan, inf, -inf, nan], width=2) == [0.0, 0.0]
+
+
+def test_intensity_text_handles_non_finite_without_crash() -> None:
+    nan = float("nan")
+    text = _intensity_text([1.0, nan, 4.0, 0.0], width=8)
+    assert len(text.plain) == 4
+
+    all_bad = _intensity_text([nan, float("inf")], width=8)
+    assert len(all_bad.plain) == 2
+    assert all(ch == "▁" for ch in all_bad.plain)
 
 
 def test_render_distribution_visual_handles_single_step_and_all_zero_weights() -> None:

@@ -142,7 +142,8 @@ def _compress_values(values: list[float], width: int) -> list[float]:
         start = index * len(values) // width
         end = (index + 1) * len(values) // width
         bucket = values[start:end] or [values[start]]
-        compressed.append(max(bucket))
+        finite = [v for v in bucket if math.isfinite(v)]
+        compressed.append(max(finite) if finite else 0.0)
     return compressed
 
 
@@ -151,12 +152,13 @@ def _intensity_text(values: list[float], *, width: int) -> Text:
     text = Text()
     if not values:
         return text
-    max_value = max(float(v) for v in values)
+    finite_samples = [float(v) for v in values if math.isfinite(v)]
+    max_value = max(finite_samples) if finite_samples else 0.0
     if max_value <= 0:
         text.append(_DISTRIBUTION_BLOCKS[0] * len(values), style=_DISTRIBUTION_ZERO_STYLE)
         return text
     for value in values:
-        if value <= 0:
+        if not math.isfinite(value) or value <= 0:
             text.append(_DISTRIBUTION_BLOCKS[0], style=_DISTRIBUTION_ZERO_STYLE)
             continue
         scale = float(value) / max_value
@@ -168,6 +170,10 @@ def _intensity_text(values: list[float], *, width: int) -> Text:
 def _sample_points_for_height(points: list[Any], max_rows: int) -> list[Any]:
     if max_rows <= 0 or len(points) <= max_rows:
         return points
+    if max_rows == 1:
+        # Evenly-spaced indices use (max_rows - 1) in the denominator; skip when
+        # max_rows is 1 and show the latest step as a single representative row.
+        return [points[-1]]
     indexes = sorted({round(i * (len(points) - 1) / (max_rows - 1)) for i in range(max_rows)})
     return [points[index] for index in indexes]
 
