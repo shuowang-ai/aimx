@@ -56,13 +56,22 @@ effects, and propose the next experiment from concrete Aim data.
    aimx trace "(<run-scope>) and metric.name == 'loss'" --repo <repo> --json --tail 50
    ```
 
-6. Collect image metadata when qualitative outputs matter:
+6. Inspect distribution traces when weight, activation, or gradient histograms
+   matter. Prefer JSON/CSV for automation; use the default visual output for
+   human terminal inspection.
+
+   ```bash
+   aimx trace distribution "<distribution-expr>" --repo <repo> --json --tail 5
+   aimx trace distribution "distribution.name != ''" --repo <repo> --step 12300
+   ```
+
+7. Collect image metadata when qualitative outputs matter:
 
    ```bash
    aimx query images "images" --repo <repo> --json --head 20
    ```
 
-7. Emit a compact `log_experiment` record containing:
+8. Emit a compact `log_experiment` record containing:
 
    ```json
    {
@@ -71,6 +80,7 @@ effects, and propose the next experiment from concrete Aim data.
      "params": {},
      "metric_summary": {},
      "trace_evidence": {},
+     "distribution_evidence": {},
      "image_evidence": {},
      "interpretation": {
        "best_runs": [],
@@ -88,6 +98,11 @@ effects, and propose the next experiment from concrete Aim data.
 - Treat `aimx query metrics` as summary data: `last`, `min`, `max`, and step
   counts. Use `aimx trace --json` when shape, stability, divergence, or late
   improvement matters.
+- Use `aimx trace distribution --json` or `--csv` for automated histogram
+  evidence. The unflagged distribution command is a non-interactive terminal
+  visual that lists matched distributions, selects the first non-empty series,
+  and renders a current-step histogram plus step-by-bin heatmap. `--step N`
+  affects only this visual mode and falls back to the nearest tracked step.
 - For minimization metrics such as loss or error, compare `min.value` and the
   corresponding step. For maximization metrics such as accuracy, F1, AUC, or
   IoU, compare `max.value`.

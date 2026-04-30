@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import io
+import tokenize
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -253,11 +254,46 @@ def collect_image_series(expression: str, repo_path: Path) -> list[dict[str, Any
     return rows
 
 
+def _normalize_distribution_query_expression(expression: str) -> str:
+    """Alias documented ``distribution`` queries to Aim's ``distributions`` variable."""
+    tokens: list[tokenize.TokenInfo] = []
+    previous_significant_token = ""
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(expression).readline):
+            if (
+                token.type == tokenize.NAME
+                and token.string == "distribution"
+                and previous_significant_token != "."
+            ):
+                token = tokenize.TokenInfo(
+                    token.type,
+                    "distributions",
+                    token.start,
+                    token.end,
+                    token.line,
+                )
+            tokens.append(token)
+            if token.type not in {
+                tokenize.COMMENT,
+                tokenize.DEDENT,
+                tokenize.ENDMARKER,
+                tokenize.INDENT,
+                tokenize.NEWLINE,
+                tokenize.NL,
+            }:
+                previous_significant_token = token.string
+    except tokenize.TokenError:
+        return expression
+
+    return tokenize.untokenize(tokens)
+
+
 def collect_distribution_series(expression: str, repo_path: Path) -> list[DistributionSeries]:
     """Run an Aim distribution query and return flat ``DistributionSeries`` records."""
     from aimx.aim_bridge.hash_resolver import resolve_hash_prefixes
 
     expression = resolve_hash_prefixes(expression, repo_path)
+    expression = _normalize_distribution_query_expression(expression)
 
     try:
         from aim import Repo

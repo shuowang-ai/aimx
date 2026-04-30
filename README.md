@@ -234,13 +234,21 @@ Display controls: `--width W`, `--height H`, `--no-color`.
 
 ### Trace distributions
 
-`aimx trace distribution` fetches tracked Aim distribution sequences and renders
-their tensor payload (histogram weights) per step in a terminal table, CSV, or
-JSON.
+`aimx trace distribution` fetches tracked Aim distribution sequences. By
+default it prints the matched distribution names, selects the first match, and
+renders a non-interactive Rich terminal visual with a web-style blue-gradient
+current-step histogram and step-by-bin heatmap. Use `--table`, `--csv`, or
+`--json` for tensor inspection and scripting.
 
 ```bash
+# Show a web-like terminal visual for the first matched distribution
+aimx trace distribution "distribution.name != ''" --repo data
+
+# Inspect a specific training step; nearest tracked step is used if needed
+aimx trace distribution "distribution.name != ''" --repo data --step 12300
+
 # Show distribution tensors in a readable table
-aimx trace distribution "distribution.name == 'weights'" --repo data
+aimx trace distribution "distribution.name == 'weights'" --repo data --table
 
 # Export distribution histograms for scripting
 aimx trace distribution "distribution.name == 'weights'" --repo data --csv

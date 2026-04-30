@@ -6,13 +6,34 @@ import io
 import json
 import math
 import shutil
+from dataclasses import dataclass
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
-from aimx.aim_bridge.metric_stats import DistributionSeries, MetricSeries, RunMeta
+from aimx.aim_bridge.metric_stats import DistributionSeries, MetricSeries
 from aimx.rendering import colors
+
+_DISTRIBUTION_BLOCKS = "▁▂▃▄▅▆▇█"
+_DISTRIBUTION_BLUE_STYLES = (
+    "#dbeafe",
+    "#bfdbfe",
+    "#93c5fd",
+    "#60a5fa",
+    "#3b82f6",
+    "#2563eb",
+    "#1d4ed8",
+    "#1e40af",
+)
+_DISTRIBUTION_ZERO_STYLE = "#334155"
+_DISTRIBUTION_HEADER_STYLE = "#93c5fd"
+_DISTRIBUTION_DIM_STYLE = "#64748b"
+_DISTRIBUTION_RULE_STYLE = "#1e3a8a"
+_DISTRIBUTION_MARKER_STYLE = "#2563eb bold"
+_DISTRIBUTION_SELECTED_STYLE = "bold white"
 
 
 def _short_hash(h: str) -> str:
@@ -23,6 +44,12 @@ def _fmt_context(ctx: dict[str, Any]) -> str:
     if not ctx:
         return ""
     return " ".join(f"{k}={v}" for k, v in sorted(ctx.items()))
+
+
+def _fmt_context_for_visual(ctx: dict[str, Any]) -> str:
+    if not ctx:
+        return ""
+    return ", ".join(f"{k}={json.dumps(v)}" for k, v in sorted(ctx.items()))
 
 
 def _series_label(series: MetricSeries) -> str:
@@ -49,6 +76,202 @@ def _distribution_series_label(series: DistributionSeries) -> str:
     if ctx:
         parts.append(f"[{ctx}]")
     return " · ".join(parts)
+
+
+@dataclass(frozen=True)
+class DistributionVisualSelection:
+    selected_index: int
+    series: DistributionSeries
+    point_index: int
+    requested_step: int | None
+    resolved_step: int
+
+    @property
+    def point(self):
+        return self.series.points[self.point_index]
+
+    @property
+    def used_nearest_step(self) -> bool:
+        return self.requested_step is not None and self.requested_step != self.resolved_step
+
+
+def select_distribution_visual(
+    series_list: list[DistributionSeries],
+    *,
+    selected_step: int | None = None,
+) -> DistributionVisualSelection | None:
+    """Select the first non-empty distribution and resolve the display step."""
+    for selected_index, series in enumerate(series_list):
+        if series.count == 0:
+            continue
+        if selected_step is None:
+            return DistributionVisualSelection(
+                selected_index=selected_index,
+                series=series,
+                point_index=0,
+                requested_step=None,
+                resolved_step=series.points[0].step,
+            )
+
+        point_index, point = min(
+            enumerate(series.points),
+            key=lambda item: (abs(item[1].step - selected_step), item[1].step),
+        )
+        return DistributionVisualSelection(
+            selected_index=selected_index,
+            series=series,
+            point_index=point_index,
+            requested_step=selected_step,
+            resolved_step=point.step,
+        )
+    return None
+
+
+def _bin_range(point: Any) -> str:
+    edges = point.bin_edges.tolist()
+    if not edges:
+        return ""
+    return f"{edges[0]:.6g} .. {edges[-1]:.6g}"
+
+
+def _compress_values(values: list[float], width: int) -> list[float]:
+    if width <= 0 or len(values) <= width:
+        return values
+    compressed: list[float] = []
+    for index in range(width):
+        start = index * len(values) // width
+        end = (index + 1) * len(values) // width
+        bucket = values[start:end] or [values[start]]
+        compressed.append(max(bucket))
+    return compressed
+
+
+def _intensity_text(values: list[float], *, width: int) -> Text:
+    values = _compress_values(values, width)
+    text = Text()
+    if not values:
+        return text
+    max_value = max(float(v) for v in values)
+    if max_value <= 0:
+        text.append(_DISTRIBUTION_BLOCKS[0] * len(values), style=_DISTRIBUTION_ZERO_STYLE)
+        return text
+    for value in values:
+        if value <= 0:
+            text.append(_DISTRIBUTION_BLOCKS[0], style=_DISTRIBUTION_ZERO_STYLE)
+            continue
+        scale = float(value) / max_value
+        index = round(scale * (len(_DISTRIBUTION_BLOCKS) - 1))
+        text.append(_DISTRIBUTION_BLOCKS[index], style=_DISTRIBUTION_BLUE_STYLES[index])
+    return text
+
+
+def _sample_points_for_height(points: list[Any], max_rows: int) -> list[Any]:
+    if max_rows <= 0 or len(points) <= max_rows:
+        return points
+    indexes = sorted({round(i * (len(points) - 1) / (max_rows - 1)) for i in range(max_rows)})
+    return [points[index] for index in indexes]
+
+
+def _render_distribution_name_list(
+    console: Console,
+    series_list: list[DistributionSeries],
+    selected_index: int,
+) -> None:
+    console.print(f"[{_DISTRIBUTION_HEADER_STYLE}]Distributions[/]")
+    for index, series in enumerate(series_list):
+        label = escape(series.name)
+        count = f"{series.count} steps" if series.count != 1 else "1 step"
+        if index == selected_index:
+            console.print(
+                f"[{_DISTRIBUTION_MARKER_STYLE}]▌[/] "
+                f"[{_DISTRIBUTION_SELECTED_STYLE}]{label}[/] "
+                f"[{_DISTRIBUTION_DIM_STYLE}]({count})[/]"
+            )
+            ctx = _fmt_context_for_visual(series.context)
+            if ctx:
+                console.print(f"  [{_DISTRIBUTION_DIM_STYLE}]{escape(ctx)}[/]")
+        else:
+            console.print(f"  [{_DISTRIBUTION_DIM_STYLE}]{label} ({count})[/]")
+
+
+def render_distribution_visual(
+    series_list: list[DistributionSeries],
+    *,
+    selected_step: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    no_color: bool = False,
+) -> str:
+    """Render distribution names plus a selected histogram and heatmap."""
+    term_width = shutil.get_terminal_size(fallback=(120, 30)).columns
+    console_width = width or (120 if no_color else term_width)
+    chart_width = max(24, min(96, console_width - 18))
+    max_heatmap_rows = max(1, (height - 12) if height is not None else 18)
+
+    buf = io.StringIO()
+    console = Console(
+        file=buf,
+        no_color=no_color,
+        color_system=None if no_color else "truecolor",
+        force_terminal=not no_color,
+        width=console_width,
+        highlight=False,
+    )
+
+    selection = select_distribution_visual(series_list, selected_step=selected_step)
+    if selection is None:
+        console.print("No data in the requested step range.")
+        return buf.getvalue()
+
+    _render_distribution_name_list(console, series_list, selection.selected_index)
+    selected = selection.series
+    point = selection.point
+    weights = [float(v) for v in point.weights.tolist()]
+
+    console.print()
+    console.print(
+        f"[{_DISTRIBUTION_HEADER_STYLE}]╭─ Histogram[/] "
+        f"[{_DISTRIBUTION_SELECTED_STYLE}]{escape(selected.name)}[/] "
+        f"[{_DISTRIBUTION_HEADER_STYLE}]Step {selection.resolved_step}[/]"
+    )
+    if selection.used_nearest_step:
+        console.print(
+            f"[{_DISTRIBUTION_DIM_STYLE}]Requested step {selection.requested_step}; "
+            f"showing nearest tracked step {selection.resolved_step}.[/]"
+        )
+    bin_range = _bin_range(point)
+    if bin_range:
+        console.print(
+            f"[{_DISTRIBUTION_DIM_STYLE}]Bins {bin_range}; "
+            f"max weight {max(weights) if weights else 0:.6g}[/]"
+        )
+    console.print(_intensity_text(weights, width=chart_width))
+    console.print(f"[{_DISTRIBUTION_RULE_STYLE}]╰{'─' * min(chart_width, console_width - 2)}[/]")
+
+    console.print()
+    console.print(f"[{_DISTRIBUTION_HEADER_STYLE}]╭─ Heatmap (steps x bins)[/]")
+    selected_points = _sample_points_for_height(selected.points, max_heatmap_rows)
+    for heatmap_point in selected_points:
+        row = Text(f"{heatmap_point.step:>8} | ", style=_DISTRIBUTION_DIM_STYLE)
+        row.append_text(
+            _intensity_text(
+                [float(v) for v in heatmap_point.weights.tolist()],
+                width=chart_width,
+            )
+        )
+        console.print(row)
+    if len(selected_points) < len(selected.points):
+        console.print(
+            f"[{_DISTRIBUTION_DIM_STYLE}]Showing {len(selected_points)} of {len(selected.points)} steps; "
+            "use --height to adjust.[/]"
+        )
+    scale = Text("Scale: ", style=_DISTRIBUTION_DIM_STYLE)
+    scale.append("low", style=_DISTRIBUTION_BLUE_STYLES[0])
+    scale.append(" -> ", style=_DISTRIBUTION_DIM_STYLE)
+    scale.append("high", style=_DISTRIBUTION_BLUE_STYLES[-1])
+    console.print(scale)
+
+    return buf.getvalue()
 
 
 def render_plot(

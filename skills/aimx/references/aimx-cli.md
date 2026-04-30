@@ -72,6 +72,14 @@ Metric expressions combine run fields with metric fields:
 (run.hash == 'eca37394') and metric.name != ''
 ```
 
+Distribution expressions combine run fields with distribution fields:
+
+```text
+(run.experiment == 'cloud-segmentation') and distribution.name != ''
+distribution.name == 'head/gradients/head.0.bias'
+distribution.context.kind == 'weights'
+```
+
 Short run hashes are expanded by `aimx` where supported.
 
 ## Params
@@ -182,6 +190,58 @@ JSON shape:
 If no metrics match, current `aimx trace --json` may print a text message
 instead of JSON. Treat that as no trace evidence rather than a parsing failure.
 
+## Distribution Traces
+
+Use distribution traces when histogram shape matters, such as weights,
+activations, gradients, or other Aim distribution sequences.
+
+For automation, keep using explicit structured modes:
+
+```bash
+aimx trace distribution "<distribution-expr>" --repo <repo> --json
+aimx trace distribution "<distribution-expr>" --repo <repo> --csv --tail 5
+aimx trace distribution "<distribution-expr>" --repo <repo> --table --head 2
+```
+
+JSON shape:
+
+```json
+[
+  {
+    "run": {
+      "hash": "full-run-hash",
+      "experiment": "experiment-name",
+      "name": "run-name"
+    },
+    "distribution": "head/gradients/head.0.bias",
+    "context": {"kind": "gradients"},
+    "count": 2,
+    "points": [
+      {
+        "step": 300,
+        "epoch": 0.0,
+        "bin_edges": [-1.0, 0.0, 1.0],
+        "weights": [0.0, 2.0]
+      }
+    ]
+  }
+]
+```
+
+For human terminal inspection, omit the output-mode flag:
+
+```bash
+aimx trace distribution "distribution.name != ''" --repo <repo>
+aimx trace distribution "distribution.name != ''" --repo <repo> --step 12300
+```
+
+Default distribution output is deterministic, non-interactive text. It lists
+matched distribution names, selects the first non-empty series, renders a
+current-step histogram, and renders a step-by-bin heatmap. `--step N` selects
+the visual histogram step; if the step is absent, `aimx` labels the nearest
+tracked step used. `--step` does not filter `--table`, `--csv`, or `--json`
+outputs.
+
 ## Images
 
 Use images for qualitative checks such as sample predictions, masks, generated
@@ -223,6 +283,8 @@ Recommended fields for autoresearch output:
 - `params`: selected hyperparameters and model identifiers per run.
 - `metric_summary`: objective metric summaries per run and context.
 - `trace_evidence`: sampled value arrays for decisive metrics.
+- `distribution_evidence`: selected histogram payloads, visual inspection notes,
+  or structured distribution rows for weight/gradient analysis.
 - `image_evidence`: image row counts and representative contexts.
 - `ranking`: best run per objective, objective direction, and tie-breakers.
 - `regressions`: runs worse than baseline, incomplete runs, missing metrics, or

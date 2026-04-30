@@ -216,6 +216,8 @@ __marimo__/
 
 # spec-kit
 .specify/
+.agents/skills/spec*
 
 # aim
 data/
+datatest/
